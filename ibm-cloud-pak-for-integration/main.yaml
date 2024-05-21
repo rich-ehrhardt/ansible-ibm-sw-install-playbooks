@@ -1,0 +1,111 @@
+---
+- name: Install IBM Cloud Pak for Integration
+  hosts: localhost
+
+  vars:
+    ansible_python_interpreter: "/opt/homebrew/Cellar/ansible/9.2.0/libexec/bin/python"
+    log_level: "info"
+    cloud_pak:
+      version: "2023.4.1"
+      license: "L-VTPK-22YZPK"
+      license_accepted: false
+      branch: "main"
+      version_uri: "https://raw.githubusercontent.com/IBM/azure-marketplace-arm-templates"
+      version_path: "cloud-pak-for-integration/version-files"
+    operator:
+      scope: "namespace"
+      namespace: "ibmint"
+    instance:
+      name: "ibmint"
+      namespace: "ibmint"
+    instance_default:
+      retries: 90
+      retry_delay: 60
+    directories:
+      bin_dir: "/usr/local/bin"
+      tmp_dir: "/tmp"
+
+  tasks:
+
+    - name: Check if oc client is already installed
+      ansible.builtin.stat:
+        path: "{{ directories.bin_dir }}/oc"
+      register: oc_file
+
+    - name: Install oc client if not already installed
+      ansible.builtin.include_tasks:
+        file: install-oc.yaml
+      when: not oc_file.stat.exists
+
+    # - name: Log into OpenShift cluster
+
+    - name: Check if version specification file exists
+      ansible.builtin.stat:
+        path: "{{ directories.tmp_dir }}/specs-{{ cloud_pak.version }}.json"
+      register: spec_file
+
+    - name: Download the spec file
+      ansible.builtin.get_url:
+        url: "{{ cloud_pak.version_uri }}/{{ cloud_pak.branch }}/{{ cloud_pak.version_path }}/specs-{{ cloud_pak.version }}.json"
+        dest: "{{ directories.tmp_dir  }}"
+      register: downloaded_file
+      when: not spec_file.stat.exists
+
+    - name: Include spec file variables
+      ansible.builtin.include_vars:
+        file: "{{ directories.tmp_dir }}/specs-{{ cloud_pak.version }}.json"
+        name: cloud_pak_inventory
+
+    - name: Install catalog sources
+      ansible.builtin.shell: |
+        echo "{{ lookup('ansible.builtin.template', './templates/catalogsource.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
+      loop: "{{ cloud_pak_inventory.catalogSources }}"
+
+    - name: Create the operator group
+      ansible.builtin.shell: |
+        echo "{{ lookup('ansible.builtin.template', './templates/operatorgroup.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
+      when: operator.scope == "namespace"
+
+    - name: Create the subscriptions
+      ansible.builtin.shell: |
+        echo "{{ lookup('ansible.builtin.template', './templates/subscription-namespace.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
+      loop: "{{ cloud_pak_inventory.subscriptions }}"
+      when: operator.scope == "namespace"
+
+    - name: Create the subscriptions
+      ansible.builtin.shell: |
+        echo "{{ lookup('ansible.builtin.template', './templates/subscription-cluster.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
+      loop: "{{ cloud_pak_inventory.subscriptions }}"
+      when: operator.scope != "namespace"
+
+    - name: Check if instance already exists
+      ansible.builtin.shell: |
+        {{ directories.bin_dir }}/oc get platformnavigator -n {{ instance.namespace }} {{ instance.name }} 2> /dev/null
+      register: query_returnedInfo
+
+    - name: Parse returned data to determine if VPC already exists
+      set_fact:
+        instanceExists: "{{True if(query_returnedInfo | length > 0) else False}}"
+
+    - name: Create platform navigator instance
+      ansible.builtin.shell: |
+        echo "{{ lookup('ansible.builtin.template', './templates/pn-instance.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
+      when: 
+        - cloudpak.license_accepted
+        - not instanceExists
+      register: query_returnedInfo
+
+    - name: Output create instance result
+      ansible.builtin.debug:
+        vars: query_returnedInfo
+      when: log_level == "debug"
+
+    - name: Wait for instance to be ready (can take up to 60 minutes)
+      ansible.builtin.shell: |
+        {{ directories.bin_dir }}oc get PlatformNavigator -n {{ instance.namespace }} {{ instance.name }} -o jsonpath='{.status.conditions[].type}'
+      args:
+        executable: /bin/bash
+      register: response
+      until: response.stdout == "Ready"
+      retries: "{{ instance_default.retries }}"
+      delay: "{{ instance_default.retry_delay }}"
