@@ -4,10 +4,10 @@ metadata:
   name: {{ item.name }}
   namespace: openshift-marketplace
 spec:
-  displayName: "{{ item.displayName }}"
-  image: "{{ item.image }}"
-  publisher: "{{ item.publisher }}"
-  sourceType: " {{ item.sourceType }}"
+  displayName: {{ item.displayName }}
+  image: {{ item.image }}
+  publisher: {{ item.publisher }}
+  sourceType: {{ item.sourceType }}
   updateStrategy:
     registryPoll:
-      interval: "{{ item.registryUpdate }}"
+      interval: {{ item.registryUpdate }}

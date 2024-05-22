@@ -3,7 +3,7 @@
   hosts: localhost
 
   vars:
-    ansible_python_interpreter: "/opt/homebrew/Cellar/ansible/9.2.0/libexec/bin/python"
+    ansible_python_interpreter: "/usr/bin/python3"
     log_level: "info"
     cloud_pak:
       version: "2023.4.1"
@@ -16,7 +16,7 @@
       scope: "namespace"
       namespace: "ibmint"
     instance:
-      name: "ibmint"
+      name: "integration-quickstart"
       namespace: "ibmint"
     instance_default:
       retries: 90
@@ -24,6 +24,9 @@
     directories:
       bin_dir: "/usr/local/bin"
       tmp_dir: "/tmp"
+    default:
+      retries: 60
+      retry_delay: 15
 
   tasks:
 
@@ -56,56 +59,95 @@
         file: "{{ directories.tmp_dir }}/specs-{{ cloud_pak.version }}.json"
         name: cloud_pak_inventory
 
-    - name: Install catalog sources
+    - name: Wait for cluster to be available
       ansible.builtin.shell: |
-        echo "{{ lookup('ansible.builtin.template', './templates/catalogsource.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
-      loop: "{{ cloud_pak_inventory.catalogSources }}"
-
-    - name: Create the operator group
-      ansible.builtin.shell: |
-        echo "{{ lookup('ansible.builtin.template', './templates/operatorgroup.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
-      when: operator.scope == "namespace"
-
-    - name: Create the subscriptions
-      ansible.builtin.shell: |
-        echo "{{ lookup('ansible.builtin.template', './templates/subscription-namespace.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
-      loop: "{{ cloud_pak_inventory.subscriptions }}"
-      when: operator.scope == "namespace"
-
-    - name: Create the subscriptions
-      ansible.builtin.shell: |
-        echo "{{ lookup('ansible.builtin.template', './templates/subscription-cluster.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
-      loop: "{{ cloud_pak_inventory.subscriptions }}"
-      when: operator.scope != "namespace"
-
-    - name: Check if instance already exists
-      ansible.builtin.shell: |
-        {{ directories.bin_dir }}/oc get platformnavigator -n {{ instance.namespace }} {{ instance.name }} 2> /dev/null
-      register: query_returnedInfo
-
-    - name: Parse returned data to determine if VPC already exists
-      set_fact:
-        instanceExists: "{{True if(query_returnedInfo | length > 0) else False}}"
-
-    - name: Create platform navigator instance
-      ansible.builtin.shell: |
-        echo "{{ lookup('ansible.builtin.template', './templates/pn-instance.j2') | to_nice_yaml | indent }}" | {{ directories.bin_dir }}/oc apply -f - 
-      when: 
-        - cloudpak.license_accepted
-        - not instanceExists
-      register: query_returnedInfo
-
-    - name: Output create instance result
-      ansible.builtin.debug:
-        vars: query_returnedInfo
-      when: log_level == "debug"
-
-    - name: Wait for instance to be ready (can take up to 60 minutes)
-      ansible.builtin.shell: |
-        {{ directories.bin_dir }}oc get PlatformNavigator -n {{ instance.namespace }} {{ instance.name }} -o jsonpath='{.status.conditions[].type}'
+        set timeout 900
+        {{ directories.bin_dir }}oc adm wait-for-stable-cluster
+        exit 0
       args:
         executable: /bin/bash
-      register: response
-      until: response.stdout == "Ready"
-      retries: "{{ instance_default.retries }}"
-      delay: "{{ instance_default.retry_delay }}"
+
+    - name: Check if operator namespace exists
+      ansible.builtin.shell: |
+        set timeout 60
+        {{ directories.bin_dir }}/oc get ns {{ operator.namespace }} 2> /dev/null
+        exit 0
+      register: query_returnedInfo
+
+    - name: Parse returned data to determine if operator namespace already exists
+      set_fact:
+        operatorNamespaceExists: "{{True if(query_returnedInfo.stdout | length > 0) else False}}"
+    
+    - name: Create operator namespace
+      ansible.builtin.shell: |
+        set timeout 300
+        {{ directories.bin_dir }}/oc create ns {{ operator.namespace }}
+        exit 0
+      when: not operatorNamespaceExists
+
+    - name: Check if instance namespace exists
+      ansible.builtin.shell: |
+        set timeout 60
+        {{ directories.bin_dir }}/oc get ns {{ instance.namespace }} 2> /dev/null
+        exit 0
+      register: query_returnedInfo
+
+    - name: Parse returned data to determine if instance namespace already exists
+      set_fact:
+        instanceNamespaceExists: "{{True if(query_returnedInfo.stdout | length > 0) else False}}"
+    
+    - name: Create instance namespace
+      ansible.builtin.shell: |
+        set timeout 300
+        {{ directories.bin_dir }}/oc create ns {{ operator.namespace }}
+        exit 0
+      when: not instanceNamespaceExists
+
+    - name: Check if entitlement key already exists
+      ansible.builtin.shell: |
+        set timeout 300
+        {{ directories.bin_dir }}/oc get secret -n {{ instance.namespace }} ibm-entitlement-key 2> /dev/null
+        exit 0
+      args:
+        executable: /bin/bash
+      register: query_returnedInfo
+
+    - name: Parse returned data to determine if secret already exists
+      set_fact:
+        secretExists: "{{True if(query_returnedInfo.stdout | length > 0) else False}}"
+
+    - name: Get IBM entitlement key if not provided and secret not created
+      ansible.builtin.pause:
+        prompt: "Please provide IBM entitlment key: "
+      register: entitlementKey
+      when: 
+        - entitlementKey is not defined
+        - not secretExists
+
+    - name: Create the entitlement key secret
+      ansible.builtin.shell:
+        cmd: "{{ directories.bin_dir }}/oc create secret docker-registry ibm-entitlement-key --docker-server=cp.icr.io --docker-username=cp --docker-password={{ entitlementKey.user_input }} -n {{ instance.namespace }}"
+      args:
+        executable: /bin/bash
+      when: not secretExists
+      register: result
+
+    - name: Create catalog source definitions
+      ansible.builtin.include_tasks:
+        file: ./create-catalog.yaml
+      loop: "{{ cloud_pak_inventory.catalogSources }}"
+
+    - name: Create the operator group definition
+      ansible.builtin.include_tasks:
+        file: ./create-og.yaml
+      when: operator.scope == "namespace"
+
+    - name: Create the subscriptions
+      ansible.builtin.include_tasks:
+        file: ./create-subscription.yaml
+      loop: "{{ cloud_pak_inventory.subscriptions }}"
+
+    - name: Create the platform navigator instance
+      ansible.builtin.include_tasks:
+        file: ./create-pn-instance.yaml
+      when: cloud_pak.license_accepted
