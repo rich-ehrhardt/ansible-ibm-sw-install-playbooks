@@ -67,4 +67,4 @@
 - name: Clean up definition file
   ansible.builtin.file:
     state: absent
-    path: "{{ directories.tmp_dir }}/{{ item.name }}-subscription.yaml"
+    path: "{{ directories.tmp_dir }}/{{ item.metadata.name }}-subscription.yaml"
