@@ -2,7 +2,7 @@
 
 - name: Display catalog source to be created
   debug:
-    var: item.name
+    msg: "Creating catalog source {{ item.name }}"
 
 - name: Create catalog source definitions
   ansible.builtin.template:

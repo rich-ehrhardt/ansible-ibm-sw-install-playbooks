@@ -1,9 +1,9 @@
 ---
 
-- name: Output the name of the subscription to be created
-  ansible.builtin.debug:
-    var: item.metadata.name
-    
+- name: Output name of subscription to be created
+  debug:
+    msg: "Creating subscription for item.metadata.name"
+
 - name: Create operator group definition (namespace scoped)
   ansible.builtin.template:
     src: "./templates/subscription-namespace.j2"
@@ -49,7 +49,7 @@
 - name: Wait for subscription to be available (cluster scoped)
   ansible.builtin.shell: |
     set timeout 60
-    CSV=$({{ directories.bin_dir }}/oc get subscription {{ item.metadata.name }} -o jsonpath='{.status.currentCSV}' )
+    CSV=$({{ directories.bin_dir }}/oc get subscription {{ item.metadata.name }} -o jsonpath='{.status.currentCSV}')
     if [[ "$CSV" == "null" ]]; then
       echo "PendingCSV"
     else
