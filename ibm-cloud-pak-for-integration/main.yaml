@@ -30,33 +30,19 @@
 
   tasks:
 
-    - name: Check if oc client is already installed
-      ansible.builtin.stat:
-        path: "{{ directories.bin_dir }}/oc"
-      register: oc_file
-
-    - name: Install oc client if not already installed
-      ansible.builtin.include_tasks:
-        file: install-oc.yaml
-      when: not oc_file.stat.exists
-
-    # - name: Log into OpenShift cluster
-
     - name: Check if version specification file exists
       ansible.builtin.stat:
-        path: "{{ directories.tmp_dir }}/specs-{{ cloud_pak.version }}.json"
+        path: "./version-specs/specs-{{ cloud_pak.version }}.json"
       register: spec_file
 
-    - name: Download the spec file
-      ansible.builtin.get_url:
-        url: "{{ cloud_pak.version_uri }}/{{ cloud_pak.branch }}/{{ cloud_pak.version_path }}/specs-{{ cloud_pak.version }}.json"
-        dest: "{{ directories.tmp_dir  }}"
-      register: downloaded_file
+    - name: Fail if the spec file is not present
+      ansible.builtin.fail:
+        msg: "IBM CP4I Version Specification File not found at ./version-specs/specs-{{ cloud_pak.version }}.json"
       when: not spec_file.stat.exists
 
     - name: Include spec file variables
       ansible.builtin.include_vars:
-        file: "{{ directories.tmp_dir }}/specs-{{ cloud_pak.version }}.json"
+        file: "./version-specs/specs-{{ cloud_pak.version }}.json"
         name: cloud_pak_inventory
 
     - name: Wait for cluster to be available
@@ -119,6 +105,7 @@
     - name: Get IBM entitlement key if not provided and secret not created
       ansible.builtin.pause:
         prompt: "Please provide IBM entitlment key: "
+        echo: false
       register: entitlementKey
       when: 
         - entitlementKey is not defined
