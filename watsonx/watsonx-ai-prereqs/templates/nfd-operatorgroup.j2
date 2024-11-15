@@ -1,0 +1,10 @@
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  generateName: openshift-nfd-
+  name: {{ nfd.operator.namespace }}
+  namespace: {{ nfd.operator.namespace }}
+spec:
+  targetNamespaces:
+    - {{ nfd.operator.namespace }}
+  upgradeStrategy: Default
