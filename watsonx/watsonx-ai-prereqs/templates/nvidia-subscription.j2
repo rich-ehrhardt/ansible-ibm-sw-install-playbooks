@@ -4,9 +4,9 @@ metadata:
   name: {{ nvidia.operator.name }}
   namespace: {{ nvidia.operator.namespace }}
 spec:
-  channel: {{ nvidia.operator_channel }}
+  channel: {{ operator_channel }}
   installPlanApproval: Automatic
   name: {{ nvidia.operator.name }}
   source: certified-operators
   sourceNamespace: openshift-marketplace
-  startingCSV: {{ nvidia.operator_package }}
+  startingCSV: {{ operator_package }}

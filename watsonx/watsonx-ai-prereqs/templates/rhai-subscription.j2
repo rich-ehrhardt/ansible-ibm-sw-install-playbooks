@@ -1,11 +1,11 @@
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
-  name: {{ operator.name }}
-  namespace: {{ operator.namespace }}
+  name: {{ rhai.operator.name }}
+  namespace: {{ rhai.operator.namespace }}
 spec:
-  channel: {{ operator.channel }}
+  channel: {{ rhai.operator.channel }}
   installPlanApproval: Automatic
-  name: {{ operator.name }}
+  name: {{ rhai.operator.name }}
   source: redhat-operators
   sourceNamespace: openshift-marketplace
